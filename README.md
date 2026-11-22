@@ -22,7 +22,7 @@ Usage:
 
 Warning:
 01. You try this at your own risk.
-02. DO NOT REMOVE "nintendo" from Blocked Domains. Use another lines to block other domains
+02. DO NOT REMOVE "nintendo" from Blocked Domains. Use another line to block other domain.
 <BR>
 
 Credits:<BR>
