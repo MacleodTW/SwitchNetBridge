@@ -2,7 +2,7 @@
 ESP32 S3 for Nintendo Switch is made from VS Code with PlatformIO.<BR>
 It's ported from jackspence7's esp32-bridge.ino and use NAT to reach internet<BR>
 <BR>
-Switch <---> SwitchNetBridge (Filter DNS, Fake Connection Test) <---> Normal Wireless AP <---> Internet
+Switch <---> SwitchNetBridge (Filter DNS, Connection Test) <---> Normal Wireless AP <---> Internet
 <BR><BR>
 
 Requirement:<BR>
