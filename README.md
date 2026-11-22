@@ -6,7 +6,7 @@ Switch <---> SwitchNetBridge (Filter DNS, Connection Test) <---> Normal Wireless
 <BR><BR>
 
 Requirement:<BR>
-。ESP32 S3 4MB flash or more
+01. ESP32 S3 4MB flash or more
 <BR><BR>
 
 Usage:
@@ -15,9 +15,12 @@ Usage:
 03. Plug ESP32-S3 dongle to recycle power
 04. Phone or PC WiFi connect to "SwitchNetBridge" SSID, default password is "password"
 05. Use browser to http://192.168.4.1/dns
-06. Set Wi-Fi SSID, password, and Relay AP password then click "Save & Reboot"
-07. Phone or PC WiFi connect to "SwitchNetBridge" SSID, use new password set on Step 06 to make sure connection is correct
-08. Switch wireless connect to SwitchNetBridge
+06. Change Relay AP password
+07. Set Internet connection Wi-Fi SSID and password, this step can be ignored for LAN only
+08. Click "Save & Reboot"
+09. Phone or PC WiFi connect to "SwitchNetBridge" SSID, use new password set on Step 06 to make sure connection is correct
+10. Switch wireless connect to SwitchNetBridge
+11. Default block all internet domain name, add to Allow Domains if needed
 <BR><BR>
 
 Warning:
