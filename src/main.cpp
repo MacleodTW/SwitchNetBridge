@@ -17,7 +17,8 @@ WiFiUDP dnsUpstream;
 //   "domain"          -> resolves A to ESP32 AP IP (192.168.4.1)
 //   "domain ipv4"     -> resolves A to custom IPv4
 //   "domain ipv6"     -> resolves AAAA to custom IPv6
-const char* DEFAULT_CUSTOM_DNS = R"(# Resolve to ESP32-S3 AP IP (192.168.4.1)
+const char* DEFAULT_CUSTOM_DNS = 
+R"(# Resolve to ESP32-S3 AP IP (192.168.4.1)
 relay.local
 esp32.local
 
@@ -35,10 +36,15 @@ api-ipv6.p01.lp1.ctest.srv.nintendo.net
 # nas.local fd00::100
 )";
 
-// Default DNS blocklist (blocks A, AAAA, HTTPS, and all other query types)
-const char* DEFAULT_BLOCKLIST = R"(# Google Ads & Analytics
-# Nintendo servers
-nintendo
+// Default DNS allowlist (only matching domains are forwarded to upstream DNS)
+const char* DEFAULT_ALLOWLIST = 
+R"(# Add allowed domains here (one per line, # for comments)
+
+# Microsoft connection test
+msftconnecttest.com
+
+# Github
+github.com
 )";
 
 // Default configuration
@@ -48,7 +54,9 @@ String apSsid = "SwitchNetBridge";
 String apPass = "password";
 String upstreamDnsStr = ""; // Blank = auto-obtain from upstream AP DHCP
 String customDnsRaw = DEFAULT_CUSTOM_DNS;
-String blocklistRaw = DEFAULT_BLOCKLIST;
+String allowlistRaw = DEFAULT_ALLOWLIST;
+bool showAllowDns = false;
+bool showBlockDns = false;
 
 IPAddress apIP(192, 168, 4, 1);
 IPAddress apGateway(192, 168, 4, 1);
@@ -69,7 +77,9 @@ void loadConfig() {
         upstreamDnsStr = prefs.getString("up_dns", "");
         upstreamDnsStr.trim();
         customDnsRaw = prefs.getString("custom_dns", DEFAULT_CUSTOM_DNS);
-        blocklistRaw = prefs.getString("blocklist", DEFAULT_BLOCKLIST);
+        allowlistRaw = prefs.getString("allowlist", DEFAULT_ALLOWLIST);
+        showAllowDns = prefs.getBool("show_allow_dns", false);
+        showBlockDns = prefs.getBool("show_block_dns", false);
         prefs.end();
     } else {
         Serial.println("[CFG] No saved config found, using defaults.");
@@ -91,7 +101,9 @@ void saveConfig() {
     prefs.putString("ap_pass", apPass);
     prefs.putString("up_dns", upstreamDnsStr);
     prefs.putString("custom_dns", customDnsRaw);
-    prefs.putString("blocklist", blocklistRaw);
+    prefs.putString("allowlist", allowlistRaw);
+    prefs.putBool("show_allow_dns", showAllowDns);
+    prefs.putBool("show_block_dns", showBlockDns);
     prefs.end();
 }
 
@@ -192,16 +204,16 @@ bool findCustomDnsRecord(const String& domain, uint16_t qType, uint8_t* outAddr,
     return false;
 }
 
-// Check if domain matches any rule in the blocklist (exact or subdomain match)
-bool isDomainBlocked(const String& domain) {
-    if (domain.length() == 0 || blocklistRaw.length() == 0) return false;
+// Check if domain matches any rule in the allowlist
+bool isDomainAllowed(const String& domain) {
+    if (domain.length() == 0 || allowlistRaw.length() == 0) return false;
 
     int start = 0;
-    while (start < (int)blocklistRaw.length()) {
-        int end = blocklistRaw.indexOf('\n', start);
-        if (end == -1) end = blocklistRaw.length();
+    while (start < (int)allowlistRaw.length()) {
+        int end = allowlistRaw.indexOf('\n', start);
+        if (end == -1) end = allowlistRaw.length();
 
-        String rule = blocklistRaw.substring(start, end);
+        String rule = allowlistRaw.substring(start, end);
         rule.trim();
         rule.toLowerCase();
         start = end + 1;
@@ -277,6 +289,68 @@ void sendNxDomainResponse(IPAddress clientIP, uint16_t clientPort, int qEndOffse
     dnsServer.endPacket();
 }
 
+// Skip a DNS name field (handles both standard labels and 0xC0 compression pointers)
+int skipDnsName(const uint8_t* buf, int len, int pos) {
+    while (pos < len) {
+        uint8_t labelLen = buf[pos];
+        if (labelLen == 0) {
+            return pos + 1;
+        }
+        if ((labelLen & 0xC0) == 0xC0) {
+            return (pos + 2 <= len) ? (pos + 2) : -1;
+        }
+        pos += labelLen + 1;
+    }
+    return -1;
+}
+
+// Parse upstream DNS response and print resolved IPv4/IPv6 addresses
+void logUpstreamDnsResponse(const String& domain, uint16_t qType, const uint8_t* buf, int len) {
+    if (len < 12) return;
+
+    uint16_t qdCount = ((uint16_t)buf[4] << 8) | buf[5];
+    uint16_t anCount = ((uint16_t)buf[6] << 8) | buf[7];
+    int pos = 12;
+
+    // Skip Question section
+    for (uint16_t i = 0; i < qdCount; i++) {
+        pos = skipDnsName(buf, len, pos);
+        if (pos < 0 || pos + 4 > len) return;
+        pos += 4; // QTYPE (2) + QCLASS (2)
+    }
+
+    // Parse Answer section
+    String ipList = "";
+    for (uint16_t i = 0; i < anCount; i++) {
+        pos = skipDnsName(buf, len, pos);
+        if (pos < 0 || pos + 10 > len) break;
+
+        uint16_t rType = ((uint16_t)buf[pos] << 8) | buf[pos + 1];
+        uint16_t rdLen = ((uint16_t)buf[pos + 8] << 8) | buf[pos + 9];
+        pos += 10; // TYPE(2) + CLASS(2) + TTL(4) + RDLENGTH(2)
+
+        if (pos + rdLen > len) break;
+
+        if (rType == 1 && rdLen == 4) { // A (IPv4)
+            IPAddress ip(buf[pos], buf[pos + 1], buf[pos + 2], buf[pos + 3]);
+            if (ipList.length() > 0) ipList += ", ";
+            ipList += ip.toString();
+        } else if (rType == 28 && rdLen == 16) { // AAAA (IPv6)
+            ip6_addr_t ip6;
+            memcpy(ip6.addr, &buf[pos], 16);
+            if (ipList.length() > 0) ipList += ", ";
+            ipList += ip6addr_ntoa(&ip6);
+        }
+        pos += rdLen;
+    }
+
+    if (ipList.length() > 0) {
+        Serial.printf("[DNS FWD] %s (Type %u) -> %s\n", domain.c_str(), qType, ipList.c_str());
+    } else {
+        Serial.printf("[DNS FWD] %s (Type %u) -> (no IP, ANCOUNT=%u)\n", domain.c_str(), qType, anCount);
+    }
+}
+
 // Handle incoming DNS queries on UDP port 53
 void handleDnsFilter() {
     int packetSize = dnsServer.parsePacket();
@@ -299,23 +373,34 @@ void handleDnsFilter() {
     if (domainMatched) {
         sendCustomDnsResponse(clientIP, clientPort, qType, qEndOffset, addrBuf, addrLen);
         Serial.printf("[DNS CUSTOM] %s (Type %u) -> %s\n",
-                      domain.c_str(), qType, addrLen == 4 ? "IPv4" : (addrLen == 16 ? "IPv6" : "NODATA"));        
+                      domain.c_str(), qType, addrLen == 4 ? "IPv4" : (addrLen == 16 ? "IPv6" : "NODATA"));
         return;
     }
 
-    // 2. Check Blocklist (blocks A, AAAA, HTTPS, etc.)
-    if (isDomainBlocked(domain)) {
-        uint8_t zeroAddr[16] = {0};
-        if (qType == 1) {            
-            sendCustomDnsResponse(clientIP, clientPort, qType, qEndOffset, zeroAddr, 4);
-            Serial.printf("[DNS BLOCK] %s (Type 1) -> 0.0.0.0\n", domain.c_str());
-        } else if (qType == 28) {            
-            sendCustomDnsResponse(clientIP, clientPort, qType, qEndOffset, zeroAddr, 16);
-            Serial.printf("[DNS BLOCK] %s (Type 28) -> ::\n", domain.c_str());
+    // 2. Check Allowlist (block everything NOT in the allowlist)
+    if (!isDomainAllowed(domain)) {
+
+        if (qType == 1) {
+            //const uint8_t loopbackV4[4] = {127, 0, 0, 1};
+            //sendCustomDnsResponse(clientIP, clientPort, qType, qEndOffset, loopbackV4, 4);
+            if (showBlockDns) {
+                //Serial.printf("[DNS BLOCK] %s (Type 1) -> 127.0.0.1\n", domain.c_str());
+                Serial.printf("[DNS BLOCK] %s (Type 1)\n", domain.c_str());
+            }
+        } else if (qType == 28) {
+            //const uint8_t loopbackV6[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
+            //sendCustomDnsResponse(clientIP, clientPort, qType, qEndOffset, loopbackV6, 16);
+            if (showBlockDns) {
+                Serial.printf("[DNS BLOCK] %s (Type 28) -> ::1\n", domain.c_str());
+                Serial.printf("[DNS BLOCK] %s (Type 28)\n", domain.c_str());
+            }
         } else {
-            sendCustomDnsResponse(clientIP, clientPort, qType, qEndOffset, nullptr, 0);
-            Serial.printf("[DNS BLOCK] %s (Type %u) -> NODATA\n", domain.c_str(), qType);
+            //sendCustomDnsResponse(clientIP, clientPort, qType, qEndOffset, nullptr, 0);
+            if (showBlockDns) {
+                Serial.printf("[DNS BLOCK] %s (Type %u) -> NODATA\n", domain.c_str(), qType);
+            }
         }
+        
         return;
     }
 
@@ -333,6 +418,11 @@ void handleDnsFilter() {
                 dnsServer.beginPacket(clientIP, clientPort);
                 dnsServer.write(dnsBuf, respLen);
                 dnsServer.endPacket();
+
+                if (showAllowDns) {
+                    logUpstreamDnsResponse(domain, qType, dnsBuf, respLen);
+                }
+
                 return;
             }
             delay(1);
@@ -419,6 +509,7 @@ void handleDnsPage() {
     html += "<title>ESP32-S3 SwitchBridge</title>";
     html += "<style>body{font-family:sans-serif;max-width:560px;margin:20px auto;padding:0 15px;}";
     html += "input,textarea{width:100%;box-sizing:border-box;margin:6px 0 14px;padding:8px;font-family:monospace;}";
+    html += "input[type='checkbox']{width:auto;margin:0 8px 0 0;vertical-align:middle;}";
     html += "button{padding:10px 16px;background:#0066cc;color:#fff;border:none;cursor:pointer;margin-right:8px;}";
     html += "button.sec{background:#666;}</style></head><body>";
     html += "<h2>ESP32-S3 SwitchBridge</h2>";
@@ -434,12 +525,16 @@ void handleDnsPage() {
     html += "AP SSID:<input name='ap_ssid' value='" + apSsid + "'>";
     html += "AP Password (min 8 chars):<input name='ap_pass' type='password' value='" + apPass + "'>";
     html += "<h3>DNS Settings (IPv4 & IPv6)</h3>";
+    html += "<label style='display:block;margin:6px 0 8px;cursor:pointer;'>";
+    html += "<input type='checkbox' name='show_allow_dns' value='1'" + String(showAllowDns ? " checked" : "") + ">show allow dns</label>";
+    html += "<label style='display:block;margin:6px 0 14px;cursor:pointer;'>";
+    html += "<input type='checkbox' name='show_block_dns' value='1'" + String(showBlockDns ? " checked" : "") + ">show block dns</label>";
     html += "Upstream DNS (leave blank for Auto from AP):<input name='up_dns' placeholder='Auto (from upstream AP)' value='" + upstreamDnsStr + "'>";
     html += "Custom DNS IP List (<code>domain</code>, <code>domain ipv4</code>, or <code>domain ipv6</code>):<textarea name='custom_dns' rows='10'>" + customDnsRaw + "</textarea>";
-    html += "Blocked Domains (blocks A & AAAA, # for comments):<textarea name='blocklist' rows='10'>" + blocklistRaw + "</textarea>";
+    html += "Allowed Domains (whitelist, blocks all others, # for comments):<textarea name='allowlist' rows='10'>" + allowlistRaw + "</textarea>";
     html += "<button type='submit'>Save & Reboot</button>";
     html += "</form><br>";
-    html += "<form method='POST' action='/dns/reset' onsubmit=\"return confirm('Reset Custom DNS & Blocklist to default?');\">";
+    html += "<form method='POST' action='/dns/reset' onsubmit=\"return confirm('Reset Custom DNS & Allowlist to default?');\">";
     html += "<button type='submit' class='sec'>Reset DNS Lists to Default</button></form>";
     html += "</body></html>";
 
@@ -457,7 +552,9 @@ void handleSave() {
         upstreamDnsStr.trim();
     }
     if (webServer.hasArg("custom_dns")) customDnsRaw = webServer.arg("custom_dns");
-    if (webServer.hasArg("blocklist")) blocklistRaw = webServer.arg("blocklist");
+    if (webServer.hasArg("allowlist")) allowlistRaw = webServer.arg("allowlist");
+    showAllowDns = webServer.hasArg("show_allow_dns");
+    showBlockDns = webServer.hasArg("show_block_dns");
 
     saveConfig();
     webServer.send(200, "text/html", "<h3>Saved! Rebooting ESP32-S3...</h3>");
@@ -468,10 +565,10 @@ void handleSave() {
 // Web UI: Reset DNS lists to default at /dns/reset
 void handleResetDns() {
     customDnsRaw = DEFAULT_CUSTOM_DNS;
-    blocklistRaw = DEFAULT_BLOCKLIST;
+    allowlistRaw = DEFAULT_ALLOWLIST;
     prefs.begin("relay_cfg", false);
     prefs.putString("custom_dns", customDnsRaw);
-    prefs.putString("blocklist", blocklistRaw);
+    prefs.putString("allowlist", allowlistRaw);
     prefs.end();
 
     webServer.sendHeader("Location", "/dns");
