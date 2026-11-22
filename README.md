@@ -18,8 +18,8 @@ Usage:
 06. Change Relay AP password
 07. Set Internet connection Wi-Fi SSID and password, this step can be ignored for LAN only
 08. Click "Save & Reboot"
-09. Phone or PC WiFi connect to "SwitchNetBridge" SSID, use new password set on Step 06 to make sure connection is correct
-10. Switch wireless connect to SwitchNetBridge
+09. Phone or PC WiFi connect to "SwitchNetBridge" SSID and use new password set on Step 6, make sure settings correct
+10. Switch WiFi connect to "SwitchNetBridge"
 11. Default block all internet domain name, add to Allow Domains if needed
 <BR><BR>
 
