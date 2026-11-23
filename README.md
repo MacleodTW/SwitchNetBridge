@@ -11,7 +11,7 @@ Requirement:<BR>
 
 Usage:
 01. Download release SwitchNetBridge_xxx.zip
-02. Flash ESP32-S3 dongle with the tool inside zip
+02. Flash ESP32-S3 dongle with the tool and readme inside zip
 03. Plug ESP32-S3 dongle to recycle power
 04. Phone or PC WiFi connect to "SwitchNetBridge" SSID, default password is "password"
 05. Use browser to http://192.168.4.1/dns
