@@ -16,7 +16,7 @@ Usage:
 04. Phone or PC WiFi connect to "SwitchNetBridge" SSID, default password is "password"
 05. Use browser to http://192.168.4.1/dns
 06. Change Relay AP password
-07. Set Internet connection Wi-Fi SSID and password, this step can be ignored for LAN only
+07. Set Internet connection Wi-Fi SSID and password, this step can be ignored for LAN access only
 08. Click "Save & Reboot"
 09. Phone or PC WiFi connect to "SwitchNetBridge" SSID and use new password set on Step 6, make sure settings correct
 10. Switch WiFi connect to "SwitchNetBridge"
