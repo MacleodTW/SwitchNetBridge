@@ -6,8 +6,11 @@ Switch <---> SwitchNetBridge (Filter DNS, Connection Test) <---> Normal Wireless
 <BR><BR>
 
 Requirement:<BR>
-01. ESP32 S3 4MB flash or more
+01. ESP32 S3 4MB flash or more<BR>
+    Example: Waveshare ESP32-S3-Zero<BR>
+    ![](https://github.com/MacleodTW/SwitchNetBridge/blob/main/.github/Waveshare%20ESP32-S3-Zero.png)
 <BR><BR>
+
 
 Usage:
 01. Download release SwitchNetBridge_xxx.zip
